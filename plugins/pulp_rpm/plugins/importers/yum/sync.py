@@ -196,7 +196,8 @@ class RepoSync(object):
 
                 with self.update_state(self.content_report) as skip:
                     if not (skip or self.skip_repomd_steps):
-                        self.update_content(metadata_files, url)
+                        packages_whitelist = self.call_config.get('package_names')
+                        self.update_content(metadata_files, url, packages_whitelist)
 
                 _logger.info(_('Downloading additional units.'))
 
@@ -407,21 +408,24 @@ class RepoSync(object):
                 shutil.copyfile(file_info['local_path'], unit.storage_path)
                 self.sync_conduit.save_unit(unit)
 
-    def update_content(self, metadata_files, url):
+    def update_content(self, metadata_files, url, packages_whitelist):
         """
         Decides what to download and then downloads it
 
         :param metadata_files:  instance of MetadataFiles
         :type  metadata_files:  pulp_rpm.plugins.importers.yum.repomd.metadata.MetadataFiles
         :param url: curret URL we should sync
-        :type: str
+        :type url: str
+        :param packages_whitelist: the list of whitelist packages
+        :type packages_whitelist: list or None
         """
-        rpms_to_download, drpms_to_download = self._decide_what_to_download(metadata_files)
+        rpms_to_download, drpms_to_download = self._decide_what_to_download(metadata_files,
+                                                                            packages_whitelist)
         self.download(metadata_files, rpms_to_download, drpms_to_download, url)
         # removes unwanted units according to the config settings
         purge.purge_unwanted_units(metadata_files, self.sync_conduit, self.call_config)
 
-    def _decide_what_to_download(self, metadata_files):
+    def _decide_what_to_download(self, metadata_files, packages_whitelist):
         """
         Given the metadata files, decides which RPMs and DRPMs should be
         downloaded. Also sets initial values on the progress report for total
@@ -430,14 +434,17 @@ class RepoSync(object):
         :param metadata_files:  instance of MetadataFiles
         :type  metadata_files:  pulp_rpm.plugins.importers.yum.repomd.metadata.MetadataFiles
 
+        :param packages_whitelist: the list of whitelist packages
+        :type packages_whitelist: list or None
+
         :return:    tuple of (set(RPM.NAMEDTUPLEs), set(DRPM.NAMEDTUPLEs))
         :rtype:     tuple
         """
         _logger.info(_('Determining which units need to be downloaded.'))
         rpms_to_download, rpms_count, rpms_total_size = \
-            self._decide_rpms_to_download(metadata_files)
+            self._decide_rpms_to_download(metadata_files, packages_whitelist)
         drpms_to_download, drpms_count, drpms_total_size = \
-            self._decide_drpms_to_download(metadata_files)
+            self._decide_drpms_to_download(metadata_files, packages_whitelist)
 
         unit_counts = {
             'rpm': rpms_count,
@@ -448,13 +455,16 @@ class RepoSync(object):
         self.set_progress()
         return rpms_to_download, drpms_to_download
 
-    def _decide_rpms_to_download(self, metadata_files):
+    def _decide_rpms_to_download(self, metadata_files, packages_whitelist):
         """
         Decide which RPMs should be downloaded based on the repo metadata and on
         the importer config.
 
         :param metadata_files:  instance of MetadataFiles
         :type  metadata_files:  pulp_rpm.plugins.importers.yum.repomd.metadata.MetadataFiles
+
+        :param packages_whitelist: the list of whitelist packages
+        :type packages_whitelist: list or None
 
         :return:    tuple of (set(RPM.NAMEDTUPLEs), number of RPMs, total size in bytes)
         :rtype:     tuple
@@ -483,13 +493,16 @@ class RepoSync(object):
         finally:
             primary_file_handle.close()
 
-    def _decide_drpms_to_download(self, metadata_files):
+    def _decide_drpms_to_download(self, metadata_files, packages_whitelist):
         """
         Decide which DRPMs should be downloaded based on the repo metadata and on
         the importer config.
 
         :param metadata_files:  instance of MetadataFiles
         :type  metadata_files:  pulp_rpm.plugins.importers.yum.repomd.metadata.MetadataFiles
+
+        :param packages_whitelist: the list of whitelist packages
+        :type packages_whitelist: list or None
 
         :return:    tuple of (set(DRPM.NAMEDTUPLEs), number of DRPMs, total size in bytes)
         :rtype:     tuple
